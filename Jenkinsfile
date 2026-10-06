@@ -2,52 +2,76 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_HUB_REPO = "your_dockerhub_username/calculator-backend"
-        DOCKER_CRED = 'dockerhub-credentials'
+        DOCKER_HUB_REPO = "hari930531/calculator-backend"
+        DOCKER_CRED     = 'dockerhub-credentials'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
+                echo "===> Checking out code from GitHub..."
                 checkout scm
+            }
+            post {
+                success {
+                    echo "✅ [SUCCESS]: Stage 1 - Code Checkout completed successfully!"
+                }
+                failure {
+                    echo "❌ [FAILED]: Stage 1 - Code Checkout failed!"
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    dir('backend') {
-                        sh "docker build -t ${DOCKER_HUB_REPO}:${BUILD_NUMBER} ."
-                        sh "docker build -t ${DOCKER_HUB_REPO}:latest ."
-                    }
+                echo "===> Building Docker images for Backend..."
+                dir('backend') {
+                    // Windows environment aana thala 'bat' use pandrom
+                    bat "docker build -t %DOCKER_HUB_REPO%:%BUILD_NUMBER% ."
+                    bat "docker build -t %DOCKER_HUB_REPO%:latest ."
+                }
+            }
+            post {
+                success {
+                    echo "✅ [SUCCESS]: Stage 2 - Docker Image Build completed successfully!"
+                }
+                failure {
+                    echo "❌ [FAILED]: Stage 2 - Docker Image Build failed!"
                 }
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
-                script {
-                    docker.withRegistry('', DOCKER_CRED) {
-                        sh "docker push ${DOCKER_HUB_REPO}:${BUILD_NUMBER}"
-                        sh "docker push ${DOCKER_HUB_REPO}:latest"
-                    }
+                echo "===> Logging in to Docker Hub and pushing images..."
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED}", passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                    bat "echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin"
+                    bat "docker push %DOCKER_HUB_REPO%:%BUILD_NUMBER%"
+                    bat "docker push %DOCKER_HUB_REPO%:latest"
+                }
+            }
+            post {
+                success {
+                    echo "✅ [SUCCESS]: Stage 3 - Docker Images pushed to Docker Hub successfully!"
+                }
+                failure {
+                    echo "❌ [FAILED]: Stage 3 - Docker Push failed!"
                 }
             }
         }
+    }
 
-        stage('Deploy to EC2') {
-            steps {
-                // EC2-la Docker compose pull & up pannalam
-                sshagent(['ec2-ssh-key']) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no ubuntu@<EC2_PUBLIC_IP> "
-                            cd /home/ubuntu/calculator-app &&
-                            docker compose pull &&
-                            docker compose up -d --remove-orphans
-                        "
-                    '''
-                }
-            }
+    // Full Pipeline mudiyumbothu varum status
+    post {
+        success {
+            echo "=========================================================="
+            echo "🎉 [ALL STAGES PASSED]: Pipeline executed successfully!"
+            echo "=========================================================="
+        }
+        failure {
+            echo "=========================================================="
+            echo "⚠️ [PIPELINE FAILED]: Please check the console output errors."
+            echo "=========================================================="
         }
     }
 }
