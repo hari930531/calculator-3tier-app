@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3-Tier Calculator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="calculator">
+        <h2>Calculator with History</h2>
+        <input type="number" id="num1" placeholder="Number 1">
+        <select id="operator">
+            <option value="+">+</option>
+            <option value="-">-</option>
+            <option value="*">*</option>
+            <option value="/">/</option>
+        </select>
+        <input type="number" id="num2" placeholder="Number 2">
+        <button onclick="calculate()">Calculate</button>
+        <h3 id="result">Result: --</h3>
+
+        <h4>Calculation History (from MySQL)</h4>
+        <ul id="history"></ul>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

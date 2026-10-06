@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  mysql-container:
+    image: mysql:8.0
+    container_name: mysql-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: calculator_db
+      MYSQL_USER: calc_user
+      MYSQL_PASSWORD: calc_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - calc-net
+
+  backend:
+    image: ${DOCKER_USERNAME}/calculator-backend:latest
+    container_name: calc-backend
+    restart: always
+    environment:
+      DB_HOST: mysql-container
+      DB_USER: calc_user
+      DB_PASSWORD: calc_password
+      DB_NAME: calculator_db
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mysql-container
+    networks:
+      - calc-net
+
+  frontend:
+    image: nginx:alpine
+    container_name: calc-frontend
+    restart: always
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+    networks:
+      - calc-net
+
+volumes:
+  mysql-data:
+
+networks:
+  calc-net:
