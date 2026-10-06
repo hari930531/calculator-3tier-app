@@ -71,8 +71,8 @@ pipeline {
             steps {
                 echo "===> Step 4: Deploying full application stack using Docker Compose..."
                 // Stop previous running containers and start updated stack
-                bat "docker compose down"
-                bat "docker compose up --build -d"
+                bat "docker-compose down"
+                bat "docker-compose up --build -d"
             }
             post {
                 success {
