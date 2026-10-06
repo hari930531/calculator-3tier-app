@@ -45,7 +45,7 @@ pipeline {
             steps {
                 echo "===> Logging in to Docker Hub and pushing images..."
                 withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED}", passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
-                    bat "echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin"
+                    bat "docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%"
                     bat "docker push %DOCKER_HUB_REPO%:%BUILD_NUMBER%"
                     bat "docker push %DOCKER_HUB_REPO%:latest"
                 }
