@@ -2,76 +2,100 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_HUB_REPO = "hari930531/calculator-backend"
+        DOCKER_HUB_REPO = 'hari930531/calculator-backend'
         DOCKER_CRED     = 'dockerhub-credentials'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                echo "===> Checking out code from GitHub..."
+                echo "===> Step 1: Checking out repository from Git..."
                 checkout scm
             }
             post {
                 success {
-                    echo "✅ [SUCCESS]: Stage 1 - Code Checkout completed successfully!"
+                    echo "[SUCCESS]: Stage 1 - Code checkout completed successfully."
                 }
                 failure {
-                    echo "❌ [FAILED]: Stage 1 - Code Checkout failed!"
+                    echo "[FAILED]: Stage 1 - Code checkout failed."
                 }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "===> Building Docker images for Backend..."
+                echo "===> Step 2: Building Backend Docker images..."
                 dir('backend') {
-                    // Windows environment aana thala 'bat' use pandrom
+                    // Build both build-number tagged image and latest tag
                     bat "docker build -t %DOCKER_HUB_REPO%:%BUILD_NUMBER% ."
                     bat "docker build -t %DOCKER_HUB_REPO%:latest ."
                 }
             }
             post {
                 success {
-                    echo "✅ [SUCCESS]: Stage 2 - Docker Image Build completed successfully!"
+                    echo "[SUCCESS]: Stage 2 - Docker image build completed successfully."
                 }
                 failure {
-                    echo "❌ [FAILED]: Stage 2 - Docker Image Build failed!"
+                    echo "[FAILED]: Stage 2 - Docker image build failed."
                 }
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
-                echo "===> Logging in to Docker Hub and pushing images..."
-                withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED}", passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                echo "===> Step 3: Authenticating and pushing images to Docker Hub..."
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKER_CRED}", 
+                    usernameVariable: 'DOCKER_USERNAME', 
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )]) {
+                    // Authenticate to Docker Hub
                     bat "docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%"
+                    
+                    // Push images
                     bat "docker push %DOCKER_HUB_REPO%:%BUILD_NUMBER%"
                     bat "docker push %DOCKER_HUB_REPO%:latest"
                 }
             }
             post {
                 success {
-                    echo "✅ [SUCCESS]: Stage 3 - Docker Images pushed to Docker Hub successfully!"
+                    echo "[SUCCESS]: Stage 3 - Docker images pushed to Docker Hub successfully."
                 }
                 failure {
-                    echo "❌ [FAILED]: Stage 3 - Docker Push failed!"
+                    echo "[FAILED]: Stage 3 - Docker push failed."
+                }
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                echo "===> Step 4: Deploying full application stack using Docker Compose..."
+                // Stop previous running containers and start updated stack
+                bat "docker compose down"
+                bat "docker compose up --build -d"
+            }
+            post {
+                success {
+                    echo "[SUCCESS]: Stage 4 - Application deployed successfully."
+                }
+                failure {
+                    echo "[FAILED]: Stage 4 - Application deployment failed."
                 }
             }
         }
     }
 
-    // Full Pipeline mudiyumbothu varum status
     post {
+        always {
+            echo "=================================================="
+            echo "Pipeline run completed."
+            echo "=================================================="
+        }
         success {
-            echo "=========================================================="
-            echo "🎉 [ALL STAGES PASSED]: Pipeline executed successfully!"
-            echo "=========================================================="
+            echo "[PIPELINE SUCCESS]: All pipeline stages passed successfully."
         }
         failure {
-            echo "=========================================================="
-            echo "⚠️ [PIPELINE FAILED]: Please check the console output errors."
-            echo "=========================================================="
+            echo "[PIPELINE FAILURE]: The build failed. Check console output for logs."
         }
     }
 }

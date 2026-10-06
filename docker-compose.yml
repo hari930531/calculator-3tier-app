@@ -8,26 +8,35 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: calculator_db
-      MYSQL_USER: calc_user
-      MYSQL_PASSWORD: calc_password
+    ports:
+      - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      # Automatically initializes database & tables on first startup
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - calc-net
 
   backend:
-    image: ${DOCKER_USERNAME}/calculator-backend:latest
+    build: ./backend
+    image: hari930531/calculator-backend:latest
     container_name: calc-backend
     restart: always
     environment:
       DB_HOST: mysql-container
-      DB_USER: calc_user
-      DB_PASSWORD: calc_password
+      DB_USER: root
+      DB_PASSWORD: rootpassword
       DB_NAME: calculator_db
     ports:
       - "5000:5000"
     depends_on:
-      - mysql-container
+      mysql-container:
+        condition: service_healthy
     networks:
       - calc-net
 
@@ -35,10 +44,12 @@ services:
     image: nginx:alpine
     container_name: calc-frontend
     restart: always
-    volumes:
-      - ./frontend:/usr/share/nginx/html:ro
     ports:
       - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
     networks:
       - calc-net
 
@@ -47,3 +58,4 @@ volumes:
 
 networks:
   calc-net:
+    driver: bridge
