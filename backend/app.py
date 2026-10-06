@@ -5,17 +5,17 @@ import os
 import time
 
 app = Flask(__name__)
-# Frontend vera port / direct file-la run aagum pothu CORS issue varama thadukka
+# Enable CORS to allow requests from frontend
 CORS(app)
 
-# Local environment default settings (Container thevai illa)
+# Environment variables with sensible defaults
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "rootpassword")  # Unga local MySQL password-ai inge podunga
+DB_PASSWORD = os.getenv("DB_PASSWORD", "rootpassword")
 DB_NAME = os.getenv("DB_NAME", "calculator_db")
 
 def get_db_connection():
-    """MySQL server connect aaga try pannum helper function"""
+    """Helper function to attempt MySQL connection with retries"""
     for attempt in range(5):
         try:
             conn = mysql.connector.connect(
@@ -31,9 +31,8 @@ def get_db_connection():
     return None
 
 def init_db():
-    """App start aagum pothu thevaiyana table-ai automatic-a create pannum"""
+    """Create database and calculations table on startup"""
     try:
-        # First database irukkaanu check panni connect pandrom
         conn = mysql.connector.connect(
             host=DB_HOST,
             user=DB_USER,
@@ -59,6 +58,20 @@ def init_db():
     except mysql.connector.Error as err:
         print(f"Error during database initialization: {err}")
 
+# --- Root Route (Fixes 404 on http://localhost:5000) ---
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "status": "healthy",
+        "service": "calculator-backend",
+        "endpoints": {
+            "root": "/",
+            "calculate": "/calculate (POST)",
+            "history": "/history (GET)"
+        }
+    })
+
+# --- Calculation Route ---
 @app.route('/calculate', methods=['POST'])
 def calculate():
     data = request.get_json()
@@ -86,7 +99,7 @@ def calculate():
     else:
         return jsonify({"error": "Unsupported operator"}), 400
 
-    # Calculation mudinjathum MySQL-la save pandrom
+    # Save calculation result to MySQL
     conn = get_db_connection()
     if conn:
         try:
@@ -101,6 +114,7 @@ def calculate():
 
     return jsonify({"result": res})
 
+# --- History Route ---
 @app.route('/history', methods=['GET'])
 def get_history():
     conn = get_db_connection()
@@ -119,7 +133,5 @@ def get_history():
         return jsonify([])
 
 if __name__ == '__main__':
-    # Database initialization nadakkum
     init_db()
-    # Flask development server port 5000-la run aagum
     app.run(host='0.0.0.0', port=5000, debug=True)
