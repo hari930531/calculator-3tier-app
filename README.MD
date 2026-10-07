@@ -104,3 +104,14 @@ Custom TCP  5000    TCP         0.0.0.0/0   Backend API
 
 LICENSE
 Distributed under the MIT License.
+
+WEBHOOK TRIGGER:
+# step 1: Enable the trigger machanisum in Jenkins Trigger section
+# step 2: Create the Tunnel between Jenking and GITHUB USE CMD:npx localtunnel --port 9090(jenkins portnumber)
+# step 3: GITHUB ---> Repository (choose the Automated project repo) ----> settings ----> webhook 
+        1.webhook/managewebhooks--->payload URL:https://shiny-humans-wait.loca.lt + /github-webhook 
+        2.content type:application/Json
+        3.secret:
+        4.SSL verification:Enabled
+        5.Which events would you like to trigger this webhook? = Just the push event.
+        6.Active
