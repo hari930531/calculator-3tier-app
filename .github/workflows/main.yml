@@ -1,0 +1,12 @@
+name: Bakend application build and test
+on:
+   workflow_dispatch:
+
+jobs:
+  build-and-test-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+         uses: actions/checkout@v3
+      - name: list files
+        run: ls 
