@@ -1,21 +1,38 @@
 name: Calculator Three-Tier CI-CD Pipeline
 
+# ==============================================================================
+# TRIGGER EVENTS
+# ==============================================================================
+# Controls when the action will run:
+# 1. Automatically on commits pushed to the "main" branch.
+# 2. Manually via the GitHub Actions UI ("workflow_dispatch").
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
+# ==============================================================================
+# GLOBAL ENVIRONMENT VARIABLES
+# ==============================================================================
+# Shared environment variables accessible across all jobs in this workflow
 env:
   DOCKER_BACKEND_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/calculator-backend:latest
 
 jobs:
+  # ============================================================================
+  # JOB 1: BUILD AND TEST
+  # ============================================================================
+  # This job handles source checkout, dependency checks, validation, and pushing
+  # the newly built image to Docker Hub.
   build-and-test:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Clone the latest repository code onto the runner
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Step 2: Configure the Python runtime with dependency caching
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -23,23 +40,30 @@ jobs:
           cache: 'pip'
           cache-dependency-path: backend/requirements.txt
 
+      # Step 3: Install packages and test code syntax
       - name: Install Dependencies & Lint/Test
         run: |
+          # Upgrade pip package manager
           python -m pip install --upgrade pip
+          # Install required backend dependencies
           pip install -r backend/requirements.txt
-          # Basic syntax check for Python backend
+          # Check for Python compilation errors in the core application
           python -m py_compile backend/app.py
 
+      # Step 4: Validate docker-compose file formatting and syntax
       - name: Validate Docker Compose Configuration
         run: |
+          # Parse and validate Compose schema integrity
           docker compose config
 
+      # Step 5: Authenticate to Docker Hub using GitHub secrets and variables
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
+      # Step 6: Build container image from backend/Dockerfile and push to registry
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v6
         with:
@@ -48,9 +72,76 @@ jobs:
           push: true
           tags: ${{ env.DOCKER_BACKEND_IMAGE }}
 
-      - name: Test Stack Deployment Locally (Optional Smoke Test)
-        run: |
-          docker compose up -d --build
-          sleep 10
-          docker compose ps
-          docker compose down
+  # ============================================================================
+  # JOB 2: DEPLOY TO AWS EC2 (SEQUENTIAL DEPENDENCY)
+  # ============================================================================
+  # By default, GitHub Actions executes all jobs in parallel.
+  # The 'needs' keyword forces this job to wait until 'build-and-test' completes successfully.
+  deploy:
+    name: Deploy to Amazon EC2
+    needs: [build-and-test] # Enforces sequential order; will fail/cancel if Job 1 fails
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Open an SSH session to the EC2 target and execute Docker lifecycle commands
+      - name: Execute Remote Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "=========================================================="
+            echo "PHASE 1: STOPPING EXISTING APPLICATION CONTAINER"
+            echo "=========================================================="
+            # Gracefully halt the existing container (append '|| true' to avoid workflow failure if container does not exist)
+            docker stop calculator-backend || true
+
+            echo "=========================================================="
+            echo "PHASE 2: REMOVING EXISTING CONTAINER INSTANCE"
+            echo "=========================================================="
+            # Remove the stopped container to release the name and assigned ports
+            docker rm calculator-backend || true
+
+            echo "=========================================================="
+            echo "PHASE 3: REMOVING OUTDATED DOCKER IMAGE"
+            echo "=========================================================="
+            # Delete the locally cached Docker image before pulling the newly updated version
+            docker rmi ${{ env.DOCKER_BACKEND_IMAGE }} || true
+
+            echo "=========================================================="
+            echo "PHASE 4: AUTHENTICATING REMOTE SERVER WITH DOCKER REGISTRY"
+            echo "=========================================================="
+            # Authenticate non-interactively using standard input to avoid writing credentials to shell logs
+            echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ vars.DOCKERHUB_USERNAME }}" --password-stdin
+
+            echo "=========================================================="
+            echo "PHASE 5: DOWNLOADING LATEST DOCKER IMAGE"
+            echo "=========================================================="
+            # Pull the fresh image layer built and published in Job 1
+            docker pull ${{ env.DOCKER_BACKEND_IMAGE }}
+
+            echo "=========================================================="
+            echo "PHASE 6: INITIALIZING AND RUNNING NEW DOCKER CONTAINER"
+            echo "=========================================================="
+            # Run the new container in background (detached) mode
+            # --name: Assign a predictable container identifier
+            # --restart: Set policy to automatically recover from crashes or reboots
+            # -p: Map host system port 5000 to internal application container port 5000
+            docker run -d \
+              --name calculator-backend \
+              --restart unless-stopped \
+              -p 5000:5000 \
+              ${{ env.DOCKER_BACKEND_IMAGE }}
+
+            echo "=========================================================="
+            echo "PHASE 7: PURGING DANGLING AND ORPHANED DOCKER ASSETS"
+            echo "=========================================================="
+            # Remove unused, untagged images and temporary cache layers to reclaim EC2 disk storage
+            docker image prune -f
+
+            echo "=========================================================="
+            echo "PHASE 8: VERIFYING DEPLOYMENT STATUS"
+            echo "=========================================================="
+            # Display container state, status, and port bindings to confirm healthy deployment
+            docker ps --filter "name=calculator-backend"
