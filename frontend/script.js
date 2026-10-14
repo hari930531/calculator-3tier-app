@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:5000";
+const API_URL = "http://16.113.27.56:5000";
 
 async function calculate() {
     const num1 = parseFloat(document.getElementById("num1").value);
