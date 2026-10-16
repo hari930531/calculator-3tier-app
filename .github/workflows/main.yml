@@ -31,7 +31,7 @@ jobs:
       - name: Build and Push Database Image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./database
           file: ./database/Dockerfile
           push: true
           tags: ${{ env.DOCKER_DATABASE_IMAGE }}
