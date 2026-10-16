@@ -1,70 +1,41 @@
-name: Calculator Three-Tier CI-CD Pipeline
+name: Calculator Three-Tier Pure Docker Pipeline
 
-# ==============================================================================
-# TRIGGER EVENTS
-# ==============================================================================
-# Controls when the action will execute:
-# 1. Automatically on pushes to the "main" branch.
-# 2. Manually via GitHub Actions UI ("workflow_dispatch").
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
-# ==============================================================================
-# GLOBAL ENVIRONMENT VARIABLES
-# ==============================================================================
-# Common variables referenced across pipeline jobs
 env:
+  DOCKER_FRONTEND_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/calculator-frontend:latest
   DOCKER_BACKEND_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/calculator-backend:latest
-  APP_DIR: /home/${{ secrets.EC2_USER }}/calculator-app
+  DOCKER_DATABASE_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/calculator-database:latest
 
 jobs:
   # ============================================================================
-  # JOB 1: BUILD AND TEST (CI)
+  # JOB 1: BUILD AND PUSH CONTAINER IMAGES (CI)
   # ============================================================================
-  # Validates Python source code, tests compose definitions, builds backend image,
-  # and publishes the artifact to Docker Hub.
-  build-and-test:
+  build-and-push:
+    name: Build & Push Images to Docker Hub
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out source code repository onto the runner filesystem
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Initialize Python runtime environment with pip package caching
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
-
-      # Step 3: Install project dependencies and check syntax for bugs
-      - name: Install Dependencies & Lint/Test
-        run: |
-          # Upgrade pip package manager
-          python -m pip install --upgrade pip
-          # Install required backend dependencies
-          pip install -r backend/requirements.txt
-          # Verify bytecode compilation to catch Python syntax errors before building
-          python -m py_compile backend/app.py
-
-      # Step 4: Validate integrity and syntax of docker-compose file
-      - name: Validate Docker Compose Configuration
-        run: |
-          # Parse and resolve Compose schema to verify configuration correctness
-          docker compose config
-
-      # Step 5: Securely log in to Docker Hub using repository secrets and variables
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Step 6: Build container image from backend/Dockerfile and push to Docker Hub
+      - name: Build and Push Database Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./database/Dockerfile
+          push: true
+          tags: ${{ env.DOCKER_DATABASE_IMAGE }}
+
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v6
         with:
@@ -73,74 +44,89 @@ jobs:
           push: true
           tags: ${{ env.DOCKER_BACKEND_IMAGE }}
 
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ env.DOCKER_FRONTEND_IMAGE }}
+
   # ============================================================================
-  # JOB 2: DEPLOY FULL THREE-TIER STACK TO AWS EC2 (CD)
+  # JOB 2: DEPLOY CONTAINERS ON AMAZON EC2 (CD)
   # ============================================================================
-  # Waits for Job 1 to succeed, transfers configuration files to EC2, and
-  # orchestrates MySQL, Backend, and Frontend containers using Docker Compose.
   deploy:
-    name: Deploy Full Stack to Amazon EC2
-    needs: [build-and-test] # Strict dependency to run sequentially after build job passes
+    name: Deploy to Amazon EC2 via SSH
+    needs: [build-and-push]
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out code repository to allow transferring necessary config files
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # Step 2: Copy docker-compose, frontend assets, and database scripts to EC2
-      # Required because volumes mount ./frontend and ./init.sql from the host path
-      - name: Transfer Project Files to EC2 via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "docker-compose.yml,docker-compose.yaml,init.sql,frontend"
-          target: "/home/${{ secrets.EC2_USER }}/calculator-app"
-          overwrite: true
-
-      # Step 3: SSH into EC2 server and perform Docker Compose lifecycle commands
-      - name: Execute Docker Compose Deployment via SSH
+      - name: SSH into EC2 and Deploy Pure Docker Containers
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "=========================================================="
-            echo "PHASE 1: NAVIGATING TO PROJECT DIRECTORY"
-            echo "=========================================================="
-            # Change directory to where docker-compose and static assets reside
-            cd /home/${{ secrets.EC2_USER }}/calculator-app
+            set -e
 
-            echo "=========================================================="
-            echo "PHASE 2: AUTHENTICATING REMOTE SERVER WITH DOCKER REGISTRY"
-            echo "=========================================================="
-            # Authenticate non-interactively using standard input to avoid leaking credentials
+            echo "=== Step 1: Log in to Docker Hub on EC2 ==="
             echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ vars.DOCKERHUB_USERNAME }}" --password-stdin
 
-            echo "=========================================================="
-            echo "PHASE 3: PULLING LATEST CONTAINER IMAGES"
-            echo "=========================================================="
-            # Download the updated backend image published in Job 1 and latest official images
-            docker compose pull
+            echo "=== Step 2: Ensure Dedicated Bridge Network Exists ==="
+            docker network inspect Calci-Network >/dev/null 2>&1 || docker network create Calci-Network
 
-            echo "=========================================================="
-            echo "PHASE 4: RECREATING AND STARTING ENTIRE THREE-TIER STACK"
-            echo "=========================================================="
-            # Recreate running containers in detached mode without dropping MySQL persistent volume
-            # Wait for MySQL to become healthy before starting the backend automatically
-            docker compose up -d --remove-orphans
+            echo "=== Step 3: Pull Latest Images from Docker Hub ==="
+            docker pull ${{ env.DOCKER_DATABASE_IMAGE }}
+            docker pull ${{ env.DOCKER_BACKEND_IMAGE }}
+            docker pull ${{ env.DOCKER_FRONTEND_IMAGE }}
 
-            echo "=========================================================="
-            echo "PHASE 5: PURGING OUTDATED AND DANGLING DOCKER IMAGES"
-            echo "=========================================================="
-            # Clean up older, replaced image versions to prevent filling up the EC2 EBS disk
-            docker image prune -f
+            echo "=== Step 4: Stop and Remove Existing Containers ==="
+            docker stop mysql-db calc-backend calc-frontend || true
+            docker rm mysql-db calc-backend calc-frontend || true
 
-            echo "=========================================================="
-            echo "PHASE 6: VERIFYING RUNNING STACK SERVICES"
-            echo "=========================================================="
-            # Display container states, health status, and mapped exposed ports
-            docker compose ps
+            echo "=== Step 5: Start MySQL Database Container ==="
+            # Runs detached, connected to Calci-Network with persistent named volume mysql-data
+            docker run -d \
+              --name mysql-db \
+              --network Calci-Network \
+              --restart always \
+              -e MYSQL_ROOT_PASSWORD=rootpassword \
+              -e MYSQL_DATABASE=calculator_db \
+              -v mysql-data:/var/lib/mysql \
+              -p 3306:3306 \
+              ${{ env.DOCKER_DATABASE_IMAGE }}
+
+            echo "=== Step 6: Wait for MySQL to Accept Connections ==="
+            # Polls until the MySQL engine responds to ping queries
+            until docker exec mysql-db mysqladmin ping -h localhost -u root -prootpassword --silent; do
+              echo "Waiting for MySQL database to become healthy..."
+              sleep 3
+            done
+
+            echo "=== Step 7: Start Backend Service Container ==="
+            # Connects to Calci-Network and resolves mysql-db container name directly via Docker DNS
+            docker run -d \
+              --name calc-backend \
+              --network Calci-Network \
+              --restart always \
+              -e DB_HOST=mysql-db \
+              -e DB_USER=root \
+              -e DB_PASSWORD=rootpassword \
+              -e DB_NAME=calculator_db \
+              -p 5000:5000 \
+              ${{ env.DOCKER_BACKEND_IMAGE }}
+
+            echo "=== Step 8: Start Frontend Web Container ==="
+            docker run -d \
+              --name calc-frontend \
+              --network Calci-Network \
+              --restart always \
+              -p 80:80 \
+              ${{ env.DOCKER_FRONTEND_IMAGE }}
+
+            echo "=== Step 9: Cleanup Unused Images ==="
+            docker image prune -af
+
+            echo "=== Step 10: Verify Running Containers ==="
+            docker ps --filter "network=Calci-Network"
